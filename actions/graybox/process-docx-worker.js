@@ -36,9 +36,9 @@ const gbDomainSuffix = '-graybox';
  * @returns {boolean} - True if content contains any graybox patterns
  */
 function hasGrayboxContent(content, experienceName) {
-    return content.includes(experienceName) || 
-           content.includes(gbStyleExpression) || 
-           content.includes(gbDomainSuffix) || 
+    return content.includes(experienceName) ||
+           content.includes(gbStyleExpression) ||
+           content.includes(gbDomainSuffix) ||
            content.includes(gbBlockName);
 }
 
@@ -368,14 +368,14 @@ async function processFiles({
                             reason: status.success ? 'No mdPath available' : 'Preview failed',
                             status: status.success ? 'skipped' : 'failed'
                         };
-                        
+
                         const unprocessedFileExcelValues = [[
                             `Unprocessed file: ${status.fileName}`,
                             toUTCStr(new Date()),
                             unprocessedFileInfo.reason,
                             JSON.stringify(unprocessedFileInfo)
                         ]];
-                        
+
                         // eslint-disable-next-line no-await-in-loop
                         await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', unprocessedFileExcelValues);
                     } catch (err) {
@@ -390,7 +390,7 @@ async function processFiles({
 
     // Write the processed files list to a JSON file
     await filesWrapper.writeFile(`graybox_promote${project}/processed_files.json`, processedFiles);
-    
+
     // Write the unprocessed files list to a JSON file
     await filesWrapper.writeFile(`graybox_promote${project}/unprocessed_files.json`, unprocessedFiles);
 
@@ -421,11 +421,11 @@ async function updateStatuses(promoteBatchesJson, copyBatchesJson, project, file
 
         logger.info(`In Process-doc-worker, for project: ${project} Processed Files Summary: ${JSON.stringify(processedFiles)}`);
         logger.info(`In Process-doc-worker, for project: ${project} Unprocessed Files Summary: ${JSON.stringify(unprocessedFiles)}`);
-        
+
         const filesSummaryValues = [[
             `Processed Files Summary: ${processedFiles.length} total files (${docxFiles.length} DOCX, ${excelFiles.length} Excel, ${otherFiles.length} Other)`,
             toUTCStr(new Date()),
-            '', 
+            '',
             JSON.stringify(processedFiles.map(file => file.sourcePath))
         ]];
         await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', filesSummaryValues);

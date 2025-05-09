@@ -212,7 +212,7 @@ async function findAllGrayboxFiles({
     const pathsToSelectRegExp = new RegExp(`^\\/(?:langstore\\/[^/]+|[^/]+)?\\/?${experienceName}\\/.+$`);
     const gbFiles = [];
     const gbFilesMetadata = [];
-    // gbFolders = ['/sabya']; // TODO: Used for quick debugging. Uncomment only during local testing.
+    gbFolders = ['/sabya']; // TODO: Used for quick debugging. Uncomment only during local testing.
     while (gbFolders.length !== 0) {
         const uri = `${baseURI}${gbFolders.shift()}:/children?$top=${MAX_CHILDREN}`;
         // eslint-disable-next-line no-await-in-loop
