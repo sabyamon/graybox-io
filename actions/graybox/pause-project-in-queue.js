@@ -51,6 +51,25 @@ async function main(params) {
                 logger.info(`In Pause Graybox Project, Before Pausing Project Status Json: ${JSON.stringify(projectStatusJson)}`);
                 projectStatusJson.status = 'paused';
                 await filesWrapper.writeFile(`graybox_promote${project}/status.json`, projectStatusJson);
+
+                // Write status to status.json
+                const statusJsonPath = `graybox_promote/bacom-graybox/${project.split('/').pop()}/status.json`;
+                let statusJson = {};
+                try {
+                    statusJson = await filesWrapper.readFileIntoObject(statusJsonPath);
+                } catch (err) {
+                    // If file doesn't exist, create new object
+                    statusJson = { statuses: [] };
+                }
+                
+                // Add new status entry
+                statusJson.statuses.push({
+                    step: 'Project paused',
+                    timestamp: new Date().toISOString(),
+                    projectPath: project
+                });
+                
+                await filesWrapper.writeFile(statusJsonPath, statusJson);
             } else {
                 responsePayload = `Project Queue empty. No project with ${projectPath} path exists`;
                 return {

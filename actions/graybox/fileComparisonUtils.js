@@ -113,8 +113,10 @@ async function checkAndCompareFileDates({ sharepoint, filesWrapper, project, fil
  * @param {string} params.projectExcelPath Project Excel path
  * @param {Array} params.newerDestinationFiles Array of newer destination files
  * @param {string} params.workerType Type of worker ('copy' or 'promote')
+ * @param {string} params.experienceName Experience name
+ * @param {Object} params.filesWrapper Files wrapper instance
  */
-async function updateExcelWithNewerFiles({ sharepoint, projectExcelPath, newerDestinationFiles, workerType }) {
+async function updateExcelWithNewerFiles({ sharepoint, projectExcelPath, newerDestinationFiles, workerType, experienceName, filesWrapper }) {
     const message = workerType === 'copy' ? 'Copying' : 'Promoting';
     if (newerDestinationFiles.length > 0) {
         try {
@@ -124,6 +126,28 @@ async function updateExcelWithNewerFiles({ sharepoint, projectExcelPath, newerDe
                  JSON.stringify(newerDestinationFiles.map(file => file.path))]
             ];
             await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', newerFilesExcelValues);
+
+            // Write status to status.json
+            const statusJsonPath = `graybox_promote/bacom-graybox/${experienceName}/status.json`;
+            let statusJson = {};
+            try {
+                statusJson = await filesWrapper.readFileIntoObject(statusJsonPath);
+            } catch (err) {
+                // If file doesn't exist, create new object
+                statusJson = { statuses: [] };
+            }
+            
+            // Add new status entry
+            statusJson.statuses.push({
+                step: `Newer destination files detected while ${message}`,
+                timestamp: toUTCStr(new Date()),
+                newerFiles: {
+                    count: newerDestinationFiles.length,
+                    files: newerDestinationFiles.map(file => file.path)
+                }
+            });
+            
+            await filesWrapper.writeFile(statusJsonPath, statusJson);
             logger.info(`${workerType.charAt(0).toUpperCase() + workerType.slice(1)} Worker: Updated project Excel with newer destination files information`);
         } catch (err) {
             logger.error(`Error occurred while updating Excel with newer destination files: ${err}`);

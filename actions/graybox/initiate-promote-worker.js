@@ -46,6 +46,15 @@ async function main(params) {
     const sharepoint = new Sharepoint(appConfig);
     const project = `${gbRootFolder}/${experienceName}`;
 
+    const projectStatusJson = {};
+
+    await filesWrapper.writeFile(`graybox_promote${project}/status.json`, projectStatusJson);
+
+    logger.info(`In Initiate Promote Worker, projectStatusJson: ${JSON.stringify(projectStatusJson)}`);
+
+    // write to JSONs to AIO Files for Projects Queue and Project Status
+    // await filesWrapper.writeFile('graybox_promote/project_queue.json', projectQueue);
+
     try {
         // Update Promote Status
         const promoteTriggeredExcelValues = [['Promote triggered', toUTCStr(new Date()), '', '']];
@@ -148,13 +157,19 @@ async function main(params) {
     logger.info(`In Initiate Promote Worker, Project Queue Json: ${JSON.stringify(projectQueue)}`);
 
     // Create Project Status JSON
-    const projectStatusJson = { status: 'initiated', params: inputParams };
+    const projectStatusJsonUpdated = { status: 'initiated', params: inputParams, statuses: [
+        {
+            stepName: 'initiated',
+            step: 'Found files to promote',
+            timestamp: toUTCStr(new Date()),
+            files: gbFiles
+        }] };
 
-    logger.info(`In Initiate Promote Worker, projectStatusJson: ${JSON.stringify(projectStatusJson)}`);
+    logger.info(`In Initiate Promote Worker, projectStatusJsonUpdated: ${JSON.stringify(projectStatusJsonUpdated)}`);
 
     // write to JSONs to AIO Files for Projects Queue and Project Status
     await filesWrapper.writeFile('graybox_promote/project_queue.json', projectQueue);
-    await filesWrapper.writeFile(`graybox_promote${project}/status.json`, projectStatusJson);
+    await filesWrapper.writeFile(`graybox_promote${project}/status.json`, projectStatusJsonUpdated);
     await filesWrapper.writeFile(`graybox_promote${project}/gbfile_batches.json`, gbFileBatchesJson);
     await filesWrapper.writeFile(`graybox_promote${project}/batch_status.json`, batchStatusJson);
     await filesWrapper.writeFile(`graybox_promote${project}/preview_status.json`, previewStatusJson);
@@ -171,6 +186,29 @@ async function main(params) {
     logger.info(`In Initiate Promote Worker, Project Status Json: ${JSON.stringify(statusJson)}`);
     const projectBatchStatusJson = await filesWrapper.readFileIntoObject(`graybox_promote${project}/batch_status.json`);
     logger.info(`In Initiate Promote Worker, Project Batch Status Json: ${JSON.stringify(projectBatchStatusJson)}`);
+
+    /* try {
+        // Write status to status.json
+        const statusJsonPath = `graybox_promote${project}/status.json`;
+        let statusJson = {};
+        try {
+            statusJson = await filesWrapper.readFileIntoObject(statusJsonPath);
+        } catch (err) {
+            // If file doesn't exist, create new object
+            statusJson = { statuses: [] };
+        }
+        
+        // Add new status entry
+        statusJson.statuses.push({
+            step: 'Promote triggered',
+            timestamp: toUTCStr(new Date()),
+            files: gbFiles
+        });
+        
+        await filesWrapper.writeFile(statusJsonPath, statusJson);
+    } catch (err) {
+        logger.error(`Error Occured while updating Excel during Graybox Initiate Promote: ${err}`);
+    } */
 
     // process data in batches
     const responsePayload = 'Graybox Initiate Promote Worker action completed.';
@@ -212,7 +250,7 @@ async function findAllGrayboxFiles({
     const pathsToSelectRegExp = new RegExp(`^\\/(?:langstore\\/[^/]+|[^/]+)?\\/?${experienceName}\\/.+$`);
     const gbFiles = [];
     const gbFilesMetadata = [];
-    // gbFolders = ['/sabya']; // TODO: Used for quick debugging. Uncomment only during local testing.
+    gbFolders = ['/sabya']; // TODO: Used for quick debugging. Uncomment only during local testing.
     while (gbFolders.length !== 0) {
         const uri = `${baseURI}${gbFolders.shift()}:/children?$top=${MAX_CHILDREN}`;
         // eslint-disable-next-line no-await-in-loop

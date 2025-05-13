@@ -112,7 +112,9 @@ async function main(params) {
             sharepoint,
             projectExcelPath,
             newerDestinationFiles,
-            workerType: 'promote'
+            workerType: 'promote',
+            experienceName,
+            filesWrapper
         });
     }
 
@@ -168,6 +170,27 @@ async function main(params) {
         const sFailedPromoteStatuses = failedPromotes.length > 0 ? `Failed Promotes: \n${failedPromotes.join('\n')}` : '';
         const promoteExcelValues = [[`Step 3 of 5: Promote completed for Batch ${batchName}`, toUTCStr(new Date()), sFailedPromoteStatuses, JSON.stringify(promotes)]];
         await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', promoteExcelValues);
+
+        // Write status to status.json
+        const statusJsonPath = `graybox_promote/bacom-graybox/${experienceName}/status.json`;
+        let statusJson = {};
+        try {
+            statusJson = await filesWrapper.readFileIntoObject(statusJsonPath);
+        } catch (err) {
+            // If file doesn't exist, create new object
+            statusJson = { statuses: [] };
+        }
+        
+        // Add new status entry
+        statusJson.statuses.push({
+            step: `Step 3 of 5: Promote completed for Batch ${batchName}`,
+            stepName: 'promoted',
+            timestamp: toUTCStr(new Date()),
+            failures: sFailedPromoteStatuses,
+            files: promotes
+        });
+        
+        await filesWrapper.writeFile(statusJsonPath, statusJson);
     } catch (err) {
         logger.error(`Error Occured while updating Excel during Graybox Promote: ${err}`);
     }
