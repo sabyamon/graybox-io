@@ -48,6 +48,11 @@ class AppConfig {
         payload.draftsOnly = params.draftsOnly;
         payload.experienceName = params.experienceName;
 
+        // Bulk copy specific configuration
+        payload.sourcePaths = params.sourcePaths || [];
+        payload.destinationPath = params.destinationPath || '';
+        payload.bulkCopyOptions = params.options || {};
+
         // These are from params set in the github configs
         this.configMap.spSite = params.spSite;
         this.configMap.spClientId = params.spClientId;
@@ -153,6 +158,7 @@ class AppConfig {
 
     getSpConfig() {
         if (!this.getUrlInfo().isValid()) {
+            logger.info('Invalid URL info');
             return undefined;
         }
 
@@ -217,6 +223,19 @@ class AppConfig {
                 batch: { uri: `${GRAPH_API}/$batch` },
             },
         };
+    }
+
+    // New methods for bulk copy support
+    getSourcePaths() {
+        return this.getPayload().sourcePaths;
+    }
+
+    getDestinationPath() {
+        return this.getPayload().destinationPath;
+    }
+
+    getBulkCopyOptions() {
+        return this.getPayload().bulkCopyOptions;
     }
 }
 

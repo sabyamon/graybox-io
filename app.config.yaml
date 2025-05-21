@@ -136,7 +136,22 @@ application:
               memorySize: 2048
             annotations:
               require-adobe-auth: false
-              final: true              
+              final: true
+          bulk-copy:
+            function: actions/graybox/bulk-copy.js
+            web: 'yes'
+            runtime: 'nodejs:18'
+            inputs:
+              LOG_LEVEL: debug
+          bulk-copy-worker:
+            function: actions/graybox/bulk-copy-worker.js
+            web: 'no'
+            runtime: 'nodejs:18'
+            inputs:
+              LOG_LEVEL: debug
+            limits:
+              timeout: 3600000
+              memorySize: 2048
         triggers:
           everyMin:
             feed: /whisk.system/alarms/interval

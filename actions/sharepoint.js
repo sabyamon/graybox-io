@@ -19,7 +19,7 @@ import { Headers } from 'node-fetch';
 import fetch from 'node-fetch';
 import { getAioLogger } from './utils.js';
 import SharepointAuth from './sharepointAuth.js';
-
+import util from 'util';
 const SP_CONN_ERR_LST = ['ETIMEDOUT', 'ECONNRESET'];
 const APP_USER_AGENT = 'NONISV|Adobe|MiloFloodgate/0.1.0';
 const NUM_REQ_THRESHOLD = 5;
@@ -82,31 +82,76 @@ class Sharepoint {
 
     async getFileData(filePath, isGraybox) {
         const sp = await this.appConfig.getSpConfig();
+        console.log('sp in getFileData', util.inspect(sp, { depth: null, colors: true }));
         const options = await this.getAuthorizedRequestOption();
         const baseURI = isGraybox ? sp.api.directory.create.gbBaseURI : sp.api.directory.create.baseURI;
-        const resp = await this.fetchWithRetry(`${baseURI}${filePath}`, options);
-        const json = await resp.json();
-        const fileDownloadUrl = json['@microsoft.graph.downloadUrl'];
-        const fileSize = json.size;
-        return { fileDownloadUrl, fileSize };
+        logger.info(`Base URI in getFileData: ${baseURI}`);
+        try {
+            const resp = await this.fetchWithRetry(`${baseURI}${filePath}`, options);
+            logger.info(`Response in getFileData: ${util.inspect(resp, { depth: null, colors: true })}`);
+            logger.info(`Response status in getFileData: ${resp.ok}`);
+            if (!resp.ok) {
+                logger.error(`Failed to get file data for ${filePath}: ${resp.status}`);
+                return { fileDownloadUrl: null, fileSize: 0 };
+            }
+            
+            const json = await resp.json();
+            logger.info(`JSON in getFileData: ${util.inspect(json, { depth: null, colors: true })}`);
+            const fileDownloadUrl = json['@microsoft.graph.downloadUrl'];
+            logger.info(`File download URL in getFileData: ${fileDownloadUrl}`);
+            const fileSize = json.size;
+            logger.info(`File size in getFileData: ${fileSize}`);
+            
+            if (!fileDownloadUrl) {
+                logger.error(`No download URL found for ${filePath}`);
+                return { fileDownloadUrl: null, fileSize: 0 };
+            }
+            
+            return { fileDownloadUrl, fileSize };
+        } catch (error) {
+            logger.error(`Error getting file data for ${filePath}: ${error.message}`);
+            return { fileDownloadUrl: null, fileSize: 0 };
+        }
     }
 
     async getFileUsingDownloadUrl(downloadUrl) {
-        const options = await this.getAuthorizedRequestOption({ json: false });
-        const response = await this.fetchWithRetry(downloadUrl, options);
-        if (response) {
-            return response.blob();
+        if (!downloadUrl) {
+            logger.error('No download URL provided');
+            return null;
         }
-        return undefined;
+
+        try {
+            const options = await this.getAuthorizedRequestOption({ json: false });
+            logger.info(`Options in getFileUsingDownloadUrl for ${downloadUrl}: ${util.inspect(options, { depth: null, colors: true })}`);
+            const response = await this.fetchWithRetry(downloadUrl, options);
+            // logger.info(`Response in getFileUsingDownloadUrl for ${downloadUrl}: ${util.inspect(response, { depth: null, colors: true })}`);
+            /* if (!response.ok) {
+                logger.error(`Failed to download file: ${response.status}`);
+                return null;
+            } */
+            if (response) {
+                // logger.info(`Response blob in getFileUsingDownloadUrl for ${downloadUrl}: ${util.inspect(response.blob(), { depth: null, colors: true })}`);
+                // logger.error(`Failed to download file: ${response.status}`);
+                return response.blob();
+            }
+            // logger.info(`Response blob in getFileUsingDownloadUrl: ${util.inspect(response.blob(), { depth: null, colors: true })}`);
+            // return response.blob();
+        } catch (error) {
+            logger.error(`Error downloading file: ${error.message}`);
+            return null;
+        }
     }
 
     async createFolder(folder, isGraybox) {
+        logger.info(`Creating folder: ${folder}`);
         const sp = await this.appConfig.getSpConfig();
         const options = await this.getAuthorizedRequestOption({ method: sp.api.directory.create.method });
         options.body = JSON.stringify(sp.api.directory.create.payload);
 
         const baseURI = isGraybox ? sp.api.directory.create.gbBaseURI : sp.api.directory.create.baseURI;
+        logger.info(`Base URI in createFolder: ${baseURI}`); // https://graph.microsoft.com/v1.0/sites/adobe.sharepoint.com/root:/bacom-graybox
         const res = await this.fetchWithRetry(`${baseURI}${folder}`, options);
+        logger.info(`Response in createFolder: ${util.inspect(res, { depth: null, colors: true })}`);
         if (res.ok) {
             return res.json();
         }
@@ -114,10 +159,15 @@ class Sharepoint {
     }
 
     getFolderFromPath(path) {
+        // For paths with a file extension (containing a dot), return the directory path
         if (path.includes('.')) {
             return path.substring(0, path.lastIndexOf('/'));
         }
+        // For paths without a file extension (like 'bacom-graybox/sabya'),
+        // return the path as is since it's considered a folder path
         return path;
+        // For the example 'bacom-graybox/sabya', this method will return 'bacom-graybox/sabya'
+        // since it doesn't contain a dot and is treated as a folder path
     }
 
     getFileNameFromPath(path) {
@@ -195,27 +245,62 @@ class Sharepoint {
     }
 
     async saveFileSimple(file, dest, isGraybox) {
+        logger.info(`Saving file ${dest} to ${isGraybox}`);
+        //dest = /demo-gb-bulk-copy/sabya/drafts/sabya-gb1-fragment.docx
+        // actual path provided is - /sabya/drafts/fragments/sabya-gb1-fragment
         try {
-            const folder = this.getFolderFromPath(dest);
-            const filename = this.getFileNameFromPath(dest);
-            logger.info(`Saving file ${filename} to ${folder}`);
-            await this.createFolder(folder, isGraybox);
-            const sp = await this.appConfig.getSpConfig();
+            if (!file) {
+                logger.error('No file content provided');
+                return { success: false, path: dest, errorMsg: 'No file content provided' };
+            }
 
+            const folder = this.getFolderFromPath(dest);
+            logger.info(`Folder in saveFileSimple: ${folder}`); // /demo-gb-bulk-copy/sabya/drafts
+            const filename = this.getFileNameFromPath(dest);
+            logger.info(`Filename in saveFileSimple: ${filename}`); // sabya-gb1-fragment.docx
+            logger.info(`Saving file ${filename} to ${folder}`); // Saving file sabya-to-be-copied.docx to bacom-graybox/sabya
+
+            // Ensure destination folder exists
+            try {
+                await this.createFolder(folder, isGraybox);
+                logger.info(`Folder created: ${folder}`);
+            } catch (error) {
+                logger.error(`Error creating folder ${folder}: ${error.message}`);
+                return { success: false, path: dest, errorMsg: `Failed to create destination folder: ${error.message}` };
+            }
+
+            const sp = await this.appConfig.getSpConfig();
+            logger.info(`SP in saveFileSimple: ${util.inspect(sp, { depth: null, colors: true })}`);
+            logger.info(`DEST in saveFileSimple: ${dest}`);
+            logger.info(`filename in saveFileSimple: ${filename}`);
+            logger.info(`isGraybox in saveFileSimple: ${isGraybox}`);
             const uploadFileStatus = await this.createSessionAndUploadFile(sp, file, dest, filename, isGraybox);
+            logger.info(`Upload file status in saveFileSimple: ${util.inspect(uploadFileStatus, { depth: null, colors: true })}`);
+
             if (uploadFileStatus.locked) {
                 logger.info(`Locked file detected: ${dest}`);
                 return { success: false, path: dest, errorMsg: 'File is locked' };
             }
+
             const uploadedFileJson = uploadFileStatus.uploadedFile;
             if (uploadedFileJson) {
-                return { success: true, uploadedFileJson, path: dest };
+                return { 
+                    success: true, 
+                    uploadedFileJson, 
+                    path: dest,
+                    metadata: {
+                        name: uploadedFileJson.name,
+                        size: uploadedFileJson.size,
+                        lastModifiedDateTime: uploadedFileJson.lastModifiedDateTime
+                    }
+                };
             }
+
+            return { success: false, path: dest, errorMsg: 'Upload failed' };
         } catch (error) {
-            logger.info(`Error while saving file: ${dest} ::: ${error.message}`);
+            logger.error(`Error while saving file: ${dest} ::: ${error.message}`);
             return { success: false, path: dest, errorMsg: error.message };
         }
-        return { success: false, path: dest };
     }
 
     async updateExcelTable(excelPath, tableName, values) {
@@ -244,6 +329,8 @@ class Sharepoint {
                     .catch((err) => reject(err)), nextCallAfter - currentTime);
             } else {
                 retryCount += 1;
+                logger.info(`Fetching with retry: ${apiUrl}`);
+                logger.info(`Options in fetchWithRetry: ${util.inspect(options, { depth: null, colors: true })}`);
                 fetch(apiUrl, options).then((resp) => {
                     this.logHeaders(resp);
                     const retryAfter = resp.headers.get('ratelimit-reset') || resp.headers.get('retry-after') || 0;
@@ -315,6 +402,62 @@ class Sharepoint {
             lastModifiedDateTime: metadata.lastModifiedDateTime,
             path: `${metadata.parentReference.path.replace(/.*:.*:/, '')}/${metadata.name}`
         };
+    }
+
+    async bulkCopyFiles(sourcePaths, destinationPath, options = {}) {
+        const results = {
+            successful: [],
+            failed: [],
+            total: sourcePaths.length
+        };
+
+        for (const sourcePath of sourcePaths) {
+            try {
+                logger.info(`Processing file: ${sourcePath}`);
+                
+                // Get file data from source
+                const { fileDownloadUrl, fileSize } = await this.getFileData(sourcePath, false);
+                if (!fileDownloadUrl) {
+                    throw new Error(`Failed to get file data for: ${sourcePath}`);
+                }
+
+                // Download the file
+                const fileContent = await this.getFileUsingDownloadUrl(fileDownloadUrl);
+                if (!fileContent) {
+                    throw new Error(`Failed to download file: ${sourcePath}`);
+                }
+
+                // Prepare destination path
+                const fileName = sourcePath.split('/').pop();
+                const destPath = `${destinationPath}/${fileName}`;
+                
+                // Save the file to destination
+                const saveResult = await this.saveFileSimple(fileContent, destPath, true);
+                if (!saveResult.success) {
+                    throw new Error(saveResult.errorMsg || `Failed to save file to: ${destPath}`);
+                }
+
+                results.successful.push({
+                    sourcePath,
+                    destinationPath: destPath,
+                    fileSize,
+                    metadata: saveResult.metadata
+                });
+
+                // Add a small delay between operations if specified
+                if (options.delayBetweenOperations) {
+                    await new Promise(resolve => setTimeout(resolve, options.delayBetweenOperations));
+                }
+            } catch (error) {
+                logger.error(`Error processing ${sourcePath}: ${error.message}`);
+                results.failed.push({
+                    sourcePath,
+                    error: error.message
+                });
+            }
+        }
+
+        return results;
     }
 }
 
