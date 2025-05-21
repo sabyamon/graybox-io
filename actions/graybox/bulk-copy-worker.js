@@ -17,6 +17,8 @@ export async function main(params) {
     } = appConfig.getPayload();
 
     const project = `${gbRootFolder}/${experienceName}`;
+    // Array to track failed files
+    const failedFiles = [];
 
     try {
         logger.info('Starting bulk copy worker');
@@ -61,12 +63,13 @@ export async function main(params) {
         currentStatus.statuses.push(processingStatus);
         await filesWrapper.writeFile(`graybox_promote${project}/bulk-copy-status.json`, currentStatus);
 
-        logger.info(`Source paths in bulk copy worker: ${sourcePaths}`);
+        logger.info(`Source paths in bulk copy worker: ${JSON.stringify(sourcePaths)}`);
         logger.info(`Destination path in bulk copy worker: ${destinationPath}`);
 
         // Process each source path
-        for (const sourcePath of sourcePaths) {
+        for (const pathInfo of sourcePaths) {
             try {
+                const { sourcePath, destinationPath: fileDestinationPath } = pathInfo;
                 logger.info(`Processing file: ${sourcePath}`); // /sabya/drafts/fragments/sabya-gb1-fragment
                 
                 // Add file processing status
@@ -84,24 +87,45 @@ export async function main(params) {
                 logger.info(`File size in bulk copy worker: ${fileSize}`);
 
                 if (!fileDownloadUrl) {
-                    throw new Error(`Failed to get file data for: ${sourcePath}`);
+                    const errorMsg = `Failed to get file data for: ${sourcePath}`;
+                    failedFiles.push({ path: sourcePath, error: errorMsg });
+                    
+                    // Write failed file to Excel immediately
+                    try {
+                        await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', 
+                            [[`Failed to copy file: ${sourcePath}`, toUTCStr(new Date()), errorMsg, '']]);
+                    } catch (excelError) {
+                        logger.error(`Failed to update Excel for file ${sourcePath}: ${excelError.message}`);
+                    }
+                    
+                    throw new Error(errorMsg);
                 }
 
                 // Download the file
                 const fileContent = await sharepoint.getFileUsingDownloadUrl(fileDownloadUrl);
-                // logger.info(`File content in bulk copy worker: ${util.inspect(fileContent, { depth: null, colors: true })}`);
                 if (!fileContent) {
+                    const errorMsg = `Failed to download file: ${sourcePath}`;
                     logger.error(`Failed to download file in bulk copy worker: ${sourcePath}`);
-                    throw new Error(`Failed to download file: ${sourcePath}`);
+                    failedFiles.push({ path: sourcePath, error: errorMsg });
+                    
+                    // Write failed file to Excel immediately
+                    try {
+                        await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', 
+                            [[`Failed to copy file: ${sourcePath}`, toUTCStr(new Date()), errorMsg, '']]);
+                    } catch (excelError) {
+                        logger.error(`Failed to update Excel for file ${sourcePath}: ${excelError.message}`);
+                    }
+                    
+                    throw new Error(errorMsg);
                 }
                 
                 const fileName = sourcePath.split('/').pop();
-                logger.info(`Actual destination path coming as param in bulk copy worker: ${destinationPath}`);
+                logger.info(`Actual destination path coming as param in bulk copy worker: ${fileDestinationPath}`);
                 logger.info(`Actual source path coming as param in bulk copy worker: ${sourcePath}`);
                 logger.info(`Actual file name coming as param in bulk copy worker: ${fileName}`);
 
-                // Combine destination path with directory structure and filename
-                const destPath = `${destinationPath}/${fileName}`; // /demo-gb-bulk-copy/sabya/drafts/fragments/sabya-gb1-fragment.docx
+                // Use the provided destination path
+                const destPath = fileDestinationPath;
                 logger.info(`Dest path thats is created in bulk copy worker: ${destPath}`);
                 logger.info(`Source path in bulk copy worker: ${sourcePath} and destination path: ${destPath}`);
                 logger.info(`File name in bulk copy worker: ${fileName}`); 
@@ -121,7 +145,18 @@ export async function main(params) {
                 const saveResult = await sharepoint.saveFileSimple(fileContent, destPath, true);
                 logger.info(`Save result in bulk copy worker: ${JSON.stringify(saveResult)}`);
                 if (!saveResult.success) {
-                    throw new Error(saveResult.errorMsg || `Failed to save file to: ${destPath}`);
+                    const errorMsg = saveResult.errorMsg || `Failed to save file to: ${destPath}`;
+                    failedFiles.push({ path: sourcePath, error: errorMsg });
+                    
+                    // Write failed file to Excel immediately
+                    try {
+                        await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', 
+                            [[`Failed to copy file: ${sourcePath}`, toUTCStr(new Date()), errorMsg, '']]);
+                    } catch (excelError) {
+                        logger.error(`Failed to update Excel for file ${sourcePath}: ${excelError.message}`);
+                    }
+                    
+                    throw new Error(errorMsg);
                 }
                 logger.info(`File saved to destination: ${destPath}`);  
 
@@ -145,9 +180,9 @@ export async function main(params) {
                 // Add a small delay between operations to prevent overwhelming the system
                 await delay(100);
             } catch (error) {
-                logger.error(`Error processing ${sourcePath}: ${error.message}`);
+                logger.error(`Error processing ${pathInfo.sourcePath}: ${error.message}`);
                 results.failed.push({
-                    sourcePath,
+                    sourcePath: pathInfo.sourcePath,
                     error: error.message
                 });
                 
@@ -156,10 +191,25 @@ export async function main(params) {
                 currentStatus.statuses.push({
                     timestamp: new Date().toISOString(),
                     status: 'file_failed',
-                    sourcePath,
+                    sourcePath: pathInfo.sourcePath,
                     error: error.message
                 });
                 await filesWrapper.writeFile(`graybox_promote${project}/bulk-copy-status.json`, currentStatus);
+                
+                // Already added to failedFiles in the specific error cases
+                if (!failedFiles.some(f => f.path === pathInfo.sourcePath)) {
+                    failedFiles.push({ path: pathInfo.sourcePath, error: error.message });
+                    
+                    // Write failed file to Excel immediately
+                    try {
+                        await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', 
+                            [[`Failed to copy file: ${pathInfo.sourcePath}`, toUTCStr(new Date()), error.message, '']]);
+                    } catch (excelError) {
+                        logger.error(`Failed to update Excel for file ${pathInfo.sourcePath}: ${excelError.message}`);
+                    }
+                }
+                
+                // Continue with the next file, don't stop the flow
             }
         }
         
@@ -173,8 +223,15 @@ export async function main(params) {
         });
         await filesWrapper.writeFile(`graybox_promote${project}/bulk-copy-status.json`, currentStatus);
 
+        // Write bulk copy completion status to Excel
         const bulkCopyCompletedExcelValues = [['Bulk Copy Completed', toUTCStr(new Date()), '', '']];
         await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', bulkCopyCompletedExcelValues);
+        
+        // Write summary of failed files to Excel if any
+        if (failedFiles.length > 0) {
+            const failedSummaryExcelValues = [[`Bulk Copy: ${failedFiles.length} files failed`, toUTCStr(new Date()), 'See individual file errors above', '']];
+            await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', failedSummaryExcelValues);
+        }
 
         return {
             statusCode: 200,
@@ -202,6 +259,10 @@ export async function main(params) {
                 error: error.message
             });
             await filesWrapper.writeFile(`graybox_promote${project}/bulk-copy-status.json`, currentStatus);
+            
+            // Write the overall error to Excel
+            const errorExcelValues = [['Bulk Copy Failed', toUTCStr(new Date()), error.message, '']];
+            await sharepoint.updateExcelTable(projectExcelPath, 'PROMOTE_STATUS', errorExcelValues);
         } catch (statusError) {
             logger.error(`Failed to update status file: ${statusError.message}`);
         }

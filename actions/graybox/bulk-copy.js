@@ -43,12 +43,21 @@ async function main(params) {
                     if (match && match[1]) {
                         // Add .docx extension if not present
                         if (!match[1].includes('.')) {
-                            return `${match[1]}.docx`;
+                            return {
+                                sourcePath: `${match[1]}.docx`,
+                                destinationPath: `/${params?.experienceName}${match[1]}.docx`
+                            };
                         }
-                        return match[1];
+                        return {
+                            sourcePath: match[1],
+                            destinationPath: `/${params?.experienceName}${match[1]}`
+                        };
                     }
                 }
-                return path; // Return original if not an AEM URL
+                return {
+                    sourcePath: path,
+                    destinationPath: `/${params?.experienceName}${path}`
+                };
             });
 
             // Extract the destination folder structure from the first source path
