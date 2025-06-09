@@ -1,16 +1,10 @@
 import fetch from 'node-fetch';
-import util from 'util';
 import { getAioLogger, strToArray } from '../utils.js';
-import Sharepoint from '../sharepoint.js';
 import AppConfig from '../appConfig.js';
 import HelixUtils from '../helixUtils.js';
 
 async function main(params) {
-    // create a Logger
     const logger = getAioLogger('find-fragments', params.LOG_LEVEL || 'info');
-    logger.info(`Params in Find Fragments: ${JSON.stringify(params)}`);
-    logger.info('Starting find fragments operation');
-
     // Convert sourcePaths to array if it's a string
     const sourcePaths = strToArray(params.sourcePaths);
     if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
@@ -23,51 +17,72 @@ async function main(params) {
     }
 
     const appConfig = new AppConfig(params);
-    logger.info(`AppConfig in find-fragments: ${JSON.stringify(appConfig)}`);
     const helixUtils = new HelixUtils(appConfig);
-    const sharepoint = new Sharepoint(appConfig);
-    logger.info(`Sharepoint in find-fragments: ${JSON.stringify(sharepoint)}`);
     const fragmentLinks = new Set();
+    const processedPaths = new Set(); // Tracking processed paths to avoid infinite loops
 
     // Process all AEM URLs in parallel
     const aemPaths = sourcePaths.filter((path) => path.includes('aem.page'));
 
-    const processPath = async (path) => {
+    const processPath = async (originalPath, isFragment = false) => {
+        // Create a copy of the path to avoid modifying the parameter
+        let pathToProcess = originalPath;
+
+        // Skip if already processed to avoid infinite loops
+        if (processedPaths.has(pathToProcess)) {
+            return [];
+        }
+        processedPaths.add(pathToProcess);
+
         // Fetch the markdown content
         const options = {};
         // Passing isGraybox param true to fetch graybox Hlx Admin API Key
         const grayboxHlxAdminApiKey = helixUtils.getAdminApiKey(false);
-        logger.info(`Graybox Hlx Admin API Key in find-fragments: ${grayboxHlxAdminApiKey}`);
         if (grayboxHlxAdminApiKey) {
             options.headers = new fetch.Headers();
             options.headers.append('Authorization', `token ${grayboxHlxAdminApiKey}`);
         }
-        path += '.md';
-        logger.info(`Fetching content for in find-fragments: ${path}`);
-        logger.info(`Options in find-fragments: ${JSON.stringify(options)}`);
-        const response = await sharepoint.fetchWithRetry(`${path}`, options);
-        const fileDataResponse = await sharepoint.getFileData('/sabya/drafts/sabya-doc-1', false);
-        logger.info(`File Data Response in find-fragments: ${JSON.stringify(fileDataResponse)}`);
-        logger.info(`Response from sharepoint in find-fragments: ${util.inspect(response, { depth: null, colors: true })}`);
-        const content = await response.text();
-        logger.info(`Content from sharepoint in find-fragments: ${content}`);
 
-        // Find fragment links in content
-        const fragmentMatches = content.match(/\[.*?\]\(.*?\/fragments\/.*?\)/g) || [];
+        // Add .md extension if not already present
+        if (!pathToProcess.endsWith('.md')) {
+            pathToProcess += '.md';
+        }
+
+        const response = await fetch(`${pathToProcess}`, options);
+        const content = await response.text();
+        logger.info(`Content from ${isFragment ? 'fragment' : 'sharepoint'} in find-fragments: ${content.substring(0, 500)}...`);
+
+        // Find fragment links in content using angle bracket format
+        // Pattern matches: <https://...aem.page/.../fragments/...>
+        const fragmentMatches = content.match(/<https:\/\/[^>]*aem\.page[^>]*\/fragments\/[^>]*>/g) || [];
         const pathFragmentLinks = [];
+
         fragmentMatches.forEach((match) => {
-            const linkMatch = match.match(/\((.*?)\)/);
-            if (linkMatch && linkMatch[1]) {
-                pathFragmentLinks.push(linkMatch[1]);
+            // Remove angle brackets to get the clean URL
+            const cleanUrl = match.slice(1, -1);
+            pathFragmentLinks.push(cleanUrl);
+        });
+
+        logger.info(`Found ${fragmentMatches.length} fragment links in ${originalPath}`);
+        // Recursively process each fragment found using Promise.all
+        const recursiveFragmentPromises = pathFragmentLinks.map(async (fragmentUrl) => {
+            try {
+                return await processPath(fragmentUrl, true);
+            } catch (error) {
+                logger.error(`Error processing fragment ${fragmentUrl}: ${error.message}`);
+                return [];
             }
         });
 
-        logger.info(`Found ${fragmentMatches.length} fragment links in ${path}`);
-        return pathFragmentLinks;
+        const recursiveResults = await Promise.all(recursiveFragmentPromises);
+        const flattenedRecursiveResults = recursiveResults.flat();
+
+        // Return both current level fragments and nested fragments
+        return [...pathFragmentLinks, ...flattenedRecursiveResults];
     };
 
     // Process all AEM paths in parallel
-    const results = await Promise.all(aemPaths.map(processPath));
+    const results = await Promise.all(aemPaths.map((path) => processPath(path)));
 
     // Add all found fragment links to the set
     results.forEach((pathLinks) => {
