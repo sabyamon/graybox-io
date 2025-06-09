@@ -89,6 +89,12 @@ application:
             runtime: nodejs:18
             inputs:
               LOG_LEVEL: debug
+          find-fragments:
+            function: actions/graybox/find-fragments.js
+            web: 'yes'
+            runtime: nodejs:18
+            inputs:
+              LOG_LEVEL: debug
           preview-sched:
             function: actions/graybox/preview-sched.js
             web: 'no'

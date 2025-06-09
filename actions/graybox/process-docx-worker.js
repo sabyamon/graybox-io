@@ -153,6 +153,8 @@ async function processFiles({
 
                     if (isDocxFile) {
                         // eslint-disable-next-line no-await-in-loop
+                        logger.info(`In Process-doc-worker, for project: ${project} Fetching with retry for ${status.mdPath}`);
+                        logger.info(`In Process-doc-worker, for project: ${project} Options: ${JSON.stringify(options)}`);
                         const response = await sharepoint.fetchWithRetry(`${status.mdPath}`, options);
                         // eslint-disable-next-line no-await-in-loop
                         const content = await response.text();
