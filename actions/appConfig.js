@@ -48,10 +48,10 @@ class AppConfig {
         payload.draftsOnly = params.draftsOnly;
         payload.experienceName = params.experienceName;
 
-        // Bulk copy specific configuration
-        payload.sourcePaths = params.sourcePaths || [];
-        payload.destinationPath = params.destinationPath || '';
-        payload.bulkCopyOptions = params.options || {};
+        // // Bulk copy specific configuration
+        // payload.sourcePaths = params.sourcePaths || [];
+        // payload.destinationPath = params.destinationPath || '';
+        // payload.bulkCopyOptions = params.options || {};
 
         // These are from params set in the github configs
         this.configMap.spSite = params.spSite;
@@ -225,7 +225,7 @@ class AppConfig {
         };
     }
 
-    // New methods for bulk copy support
+    /* // New methods for bulk copy support
     getSourcePaths() {
         return this.getPayload().sourcePaths;
     }
@@ -236,7 +236,7 @@ class AppConfig {
 
     getBulkCopyOptions() {
         return this.getPayload().bulkCopyOptions;
-    }
+    } */
 }
 
 export default AppConfig;

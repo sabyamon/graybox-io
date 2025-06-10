@@ -1,3 +1,20 @@
+/* ***********************************************************************
+ * ADOBE CONFIDENTIAL
+ * ___________________
+ *
+ * Copyright 2025 Adobe
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained herein is, and remains
+ * the property of Adobe and its suppliers, if any. The intellectual
+ * and technical concepts contained herein are proprietary to Adobe
+ * and its suppliers and are protected by all applicable intellectual
+ * property laws, including trade secret and copyright laws.
+ * Dissemination of this information or reproduction of this material
+ * is strictly forbidden unless prior written permission is obtained
+ * from Adobe.
+ ************************************************************************* */
+
 import { getAioLogger, strToArray } from '../utils.js';
 import openwhisk from 'openwhisk';
 
@@ -5,10 +22,8 @@ async function main(params) {
     // create a Logger
     const logger = getAioLogger('bulk-copy', params.LOG_LEVEL || 'info');
     const ow = openwhisk();
-    logger.info(`Params in Bulk Copy: ${JSON.stringify(params)}`);
     try {
         logger.info('Starting bulk copy operation');
-
         // check for missing request input parameters
         const requiredParams = ['sourcePaths'];
 
@@ -22,7 +37,6 @@ async function main(params) {
             };
         }
 
-        // Convert sourcePaths to array if it's a string
         const sourcePaths = strToArray(params.sourcePaths);
         if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
             return {
@@ -35,7 +49,7 @@ async function main(params) {
 
         try {
             // Process sourcePaths to extract the actual path from AEM URLs
-            const processedSourcePaths = sourcePaths.map(path => {
+            const processedSourcePaths = sourcePaths.map((path) => {
                 // Check if the path is an AEM URL
                 if (path.includes('aem.page')) {
                     // Extract the path after aem.page
@@ -76,14 +90,6 @@ async function main(params) {
 
             // Form the complete destination path by combining gbRootFolder with the extracted subpath
             const formattedDestinationPath = `/${params?.experienceName}${destinationSubPath}`;
-            
-            logger.info(`Formed destination path: ${formattedDestinationPath}`);
-            
-            // Update the destination path in params
-            // destinationPath = /graybox-test/sabya/drafts (creates a folder inside /bacom-graybox)
-            // gbRootFolder = /bacom-graybox
-            // rootFolder = /bacom
-
             const workerResponse = await ow.actions.invoke({
                 name: 'graybox/bulk-copy-worker',
                 blocking: false,
@@ -94,17 +100,14 @@ async function main(params) {
                     destinationPath: formattedDestinationPath
                 }
             });
-            
-            logger.info(workerResponse);
+
             return {
                 statusCode: 200,
                 body: {
-                    processedSourcePaths,
-                    formattedDestinationPath,
+                    pathDetails: processedSourcePaths,
+                    destinationFolder: formattedDestinationPath,
                     message: 'Bulk copy operation started',
                     activationId: workerResponse.activationId,
-                    sourcePaths,
-                    destinationPath: params.destinationPath
                 }
             };
         } catch (err) {
